@@ -1,6 +1,6 @@
 const express = require('express');
 const path = require('path');
-const db = require('./db');
+const { pool, init } = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -8,39 +8,54 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-app.get('/api/messages/count', (_req, res) => {
-  const { total } = db.prepare('SELECT COUNT(*) as total FROM messages').get();
-  res.json({ total });
-});
-
-app.get('/api/messages/random', (req, res) => {
-  const excludeId = req.query.exclude != null ? Number(req.query.exclude) : null;
-
-  let msg = excludeId != null
-    ? db.prepare('SELECT * FROM messages WHERE id != ? ORDER BY RANDOM() LIMIT 1').get(excludeId)
-    : null;
-
-  if (!msg) {
-    msg = db.prepare('SELECT * FROM messages ORDER BY RANDOM() LIMIT 1').get();
+app.get('/api/messages/count', async (_req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT COUNT(*) AS total FROM messages');
+    res.json({ total: parseInt(rows[0].total) });
+  } catch {
+    res.status(500).json({ error: 'db_error' });
   }
-
-  if (!msg) return res.status(404).json({ error: 'no_messages' });
-
-  const { total } = db.prepare('SELECT COUNT(*) as total FROM messages').get();
-  res.json({ id: msg.id, text: msg.text, created_at: msg.created_at, total });
 });
 
-app.post('/api/messages', (req, res) => {
-  const text = (req.body?.text ?? '').trim();
+app.get('/api/messages/random', async (req, res) => {
+  try {
+    const excludeId = req.query.exclude != null ? Number(req.query.exclude) : null;
 
-  if (!text) return res.status(400).json({ error: 'empty' });
-  if (text.length > 280) return res.status(400).json({ error: 'too_long' });
+    let result = excludeId != null
+      ? await pool.query('SELECT * FROM messages WHERE id != $1 ORDER BY RANDOM() LIMIT 1', [excludeId])
+      : await pool.query('SELECT * FROM messages ORDER BY RANDOM() LIMIT 1');
 
-  const { lastInsertRowid } = db.prepare('INSERT INTO messages (text) VALUES (?)').run(text);
-  const msg = db.prepare('SELECT * FROM messages WHERE id = ?').get(lastInsertRowid);
-  const { total } = db.prepare('SELECT COUNT(*) as total FROM messages').get();
+    if (result.rows.length === 0 && excludeId != null) {
+      result = await pool.query('SELECT * FROM messages ORDER BY RANDOM() LIMIT 1');
+    }
 
-  res.status(201).json({ id: msg.id, text: msg.text, created_at: msg.created_at, total });
+    if (result.rows.length === 0) return res.status(404).json({ error: 'no_messages' });
+
+    const msg = result.rows[0];
+    const { rows } = await pool.query('SELECT COUNT(*) AS total FROM messages');
+    res.json({ id: msg.id, text: msg.text, created_at: msg.created_at, total: parseInt(rows[0].total) });
+  } catch {
+    res.status(500).json({ error: 'db_error' });
+  }
 });
 
-app.listen(PORT, () => console.log(`msg.sys running on http://localhost:${PORT}`));
+app.post('/api/messages', async (req, res) => {
+  try {
+    const text = (req.body?.text ?? '').trim();
+    if (!text) return res.status(400).json({ error: 'empty' });
+    if (text.length > 280) return res.status(400).json({ error: 'too_long' });
+
+    const { rows: [msg] } = await pool.query(
+      'INSERT INTO messages (text) VALUES ($1) RETURNING *',
+      [text]
+    );
+    const { rows } = await pool.query('SELECT COUNT(*) AS total FROM messages');
+    res.status(201).json({ id: msg.id, text: msg.text, created_at: msg.created_at, total: parseInt(rows[0].total) });
+  } catch {
+    res.status(500).json({ error: 'db_error' });
+  }
+});
+
+init()
+  .then(() => app.listen(PORT, () => console.log(`msg.sys running on http://localhost:${PORT}`)))
+  .catch((err) => { console.error('db init failed:', err); process.exit(1); });

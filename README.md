@@ -16,42 +16,25 @@ O contador de linhas (`ROWS`) no topo é atualizado em tempo real após cada POS
 | Camada    | Tecnologia                              |
 |-----------|-----------------------------------------|
 | Backend   | Node.js + Express                       |
-| Banco     | SQLite via `better-sqlite3`             |
+| Banco     | PostgreSQL                              |
 | Frontend  | HTML + CSS + JavaScript (sem framework) |
 | Container | Docker + Docker Compose                 |
 
 O Express serve os arquivos estáticos do frontend e expõe três endpoints REST:
 
-| Método | Rota                   | Descrição                                      |
-|--------|------------------------|------------------------------------------------|
-| GET    | `/api/messages/random` | Retorna uma mensagem aleatória (`?exclude=<id>` opcional) |
-| POST   | `/api/messages`        | Cadastra nova mensagem (`{ "text": string }`)  |
-| GET    | `/api/messages/count`  | Retorna o total de mensagens (`{ total }`)     |
+| Método | Rota                   | Descrição                                                       |
+|--------|------------------------|-----------------------------------------------------------------|
+| GET    | `/api/messages/random` | Retorna uma mensagem aleatória (`?exclude=<id>` opcional)       |
+| POST   | `/api/messages`        | Cadastra nova mensagem (`{ "text": string }`)                   |
+| GET    | `/api/messages/count`  | Retorna o total de mensagens (`{ total }`)                      |
 
-O banco SQLite é inicializado automaticamente com 20 mensagens de seed na primeira execução.
+O banco é inicializado automaticamente com 20 mensagens de seed na primeira execução.
 
 ## Como utilizar
 
-### Pré-requisitos
+### Desenvolvimento local (Docker)
 
-- Node.js 20+ **ou** Docker + Docker Compose
-
-### Desenvolvimento local
-
-```bash
-npm install
-npm start
-```
-
-Acesse `http://localhost:3000`. O banco é criado em `./data/messages.db`.
-
-Para desenvolvimento com hot-reload (Node.js 18+):
-
-```bash
-npm run dev
-```
-
-### Com Docker (recomendado)
+Sobe a aplicação e um PostgreSQL juntos com um único comando:
 
 ```bash
 docker compose up --build
@@ -77,21 +60,47 @@ Para destruir também os dados persistidos:
 docker compose down -v
 ```
 
+### Produção (múltiplas instâncias)
+
+Em produção o banco roda em uma instância separada e as instâncias de app apontam para ele via variável de ambiente. O `docker-compose.yml` não é usado — cada instância de app roda apenas o container da aplicação.
+
+**1. Na EC2 de banco** — instale e configure o PostgreSQL, crie o banco e o usuário:
+
+```sql
+CREATE DATABASE mensagens;
+CREATE USER msguser WITH PASSWORD 'sua_senha';
+GRANT ALL PRIVILEGES ON DATABASE mensagens TO msguser;
+```
+
+**2. Em cada EC2 de app** — clone o repositório, crie um arquivo `.env` com a connection string apontando para o IP privado da EC2 de banco:
+
+```bash
+DATABASE_URL=postgres://msguser:sua_senha@<IP-PRIVADO-DO-BANCO>:5432/mensagens
+PORT=3000
+```
+
+**3.** Suba o container passando o `.env`:
+
+```bash
+docker build -t sistema-mensagens .
+docker run -d --env-file .env -p 3000:3000 --restart unless-stopped sistema-mensagens
+```
+
 ## Variáveis de ambiente
 
-| Variável   | Padrão       | Descrição                        |
-|------------|--------------|----------------------------------|
-| `PORT`     | `3000`       | Porta em que o servidor escuta   |
-| `DATA_DIR` | `./data`     | Diretório onde o SQLite é salvo  |
+| Variável       | Obrigatória | Descrição                          |
+|----------------|-------------|------------------------------------|
+| `DATABASE_URL` | Sim         | Connection string do PostgreSQL    |
+| `PORT`         | Não         | Porta do servidor (padrão: `3000`) |
 
 ## Estrutura do projeto
 
 ```
 ├── server.js          # Servidor Express e rotas da API
-├── db.js              # Inicialização do SQLite e seed
+├── db.js              # Pool de conexão, criação da tabela e seed
 ├── public/
 │   └── index.html     # Frontend completo (HTML + CSS + JS)
-├── Dockerfile         # Build multi-stage (Alpine)
-├── docker-compose.yml # Orquestração com volume persistente
+├── Dockerfile         # Imagem da aplicação (node:20-alpine)
+├── docker-compose.yml # Dev: app + PostgreSQL com healthcheck
 └── package.json
 ```

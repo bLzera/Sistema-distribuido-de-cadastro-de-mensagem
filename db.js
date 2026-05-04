@@ -1,19 +1,6 @@
-const Database = require('better-sqlite3');
-const path = require('path');
-const fs = require('fs');
+const { Pool } = require('pg');
 
-const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-
-const db = new Database(path.join(DATA_DIR, 'messages.db'));
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS messages (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    text       TEXT NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )
-`);
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
 const SEED = [
   'o silêncio também é uma forma de fala',
@@ -38,11 +25,21 @@ const SEED = [
   'a internet é grande e a gente é pequeno',
 ];
 
-const isEmpty = db.prepare('SELECT COUNT(*) as count FROM messages').get().count === 0;
-if (isEmpty) {
-  const insert = db.prepare('INSERT INTO messages (text) VALUES (?)');
-  const seedAll = db.transaction((rows) => rows.forEach((t) => insert.run(t)));
-  seedAll(SEED);
+async function init() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS messages (
+      id         SERIAL PRIMARY KEY,
+      text       TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  const { rows } = await pool.query('SELECT COUNT(*) AS count FROM messages');
+  if (parseInt(rows[0].count) === 0) {
+    for (const text of SEED) {
+      await pool.query('INSERT INTO messages (text) VALUES ($1)', [text]);
+    }
+  }
 }
 
-module.exports = db;
+module.exports = { pool, init };
