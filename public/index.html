@@ -1,0 +1,572 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>msg.sys // terminal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #0a0e0a;
+    --bg-2: #0d130d;
+    --fg: #c8d4c8;
+    --fg-dim: #6a7a6a;
+    --fg-faint: #3d4a3d;
+    --accent: #7fff9f;
+    --accent-dim: #4ea766;
+    --warn: #ffb86b;
+    --error: #ff6b6b;
+    --line: rgba(127, 255, 159, 0.12);
+    --line-strong: rgba(127, 255, 159, 0.28);
+    --mono: 'JetBrains Mono', ui-monospace, 'Menlo', 'Consolas', monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--mono);
+    font-size: 15px;
+    line-height: 1.55;
+    height: 100%;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+      to bottom,
+      rgba(255,255,255,0.012) 0px,
+      rgba(255,255,255,0.012) 1px,
+      transparent 1px,
+      transparent 3px
+    );
+    z-index: 50;
+    mix-blend-mode: overlay;
+  }
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.55) 100%);
+    z-index: 49;
+  }
+
+  .app {
+    position: fixed;
+    inset: 0;
+    display: grid;
+    grid-template-rows: auto 1fr auto auto;
+    padding: 24px clamp(20px, 5vw, 64px);
+    gap: 14px;
+  }
+
+  /* ─── Top bar ────────────────────────────────────────── */
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border: 1px solid var(--line);
+    padding: 10px 16px;
+    color: var(--fg-dim);
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    background: var(--bg-2);
+  }
+  .topbar .left {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent), 0 0 2px var(--accent);
+    animation: pulse 2.4s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
+  }
+  .topbar .path { color: var(--fg); }
+  .topbar .right { display: flex; gap: 18px; }
+  .topbar .right span b { color: var(--accent); font-weight: 500; }
+
+  /* ─── Main display ───────────────────────────────────── */
+  .main {
+    position: relative;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    border: 1px solid var(--line);
+    background:
+      linear-gradient(180deg, rgba(127,255,159,0.02), transparent 30%),
+      var(--bg-2);
+    overflow: hidden;
+  }
+
+  .main-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 18px;
+    border-bottom: 1px solid var(--line);
+    color: var(--fg-dim);
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+  .main-head .meta-id {
+    color: var(--accent-dim);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .stage {
+    display: grid;
+    place-items: center;
+    padding: clamp(20px, 5vh, 60px) clamp(20px, 5vw, 80px);
+    min-height: 0;
+  }
+
+  .message {
+    max-width: 900px;
+    text-align: center;
+    font-size: clamp(20px, 3.4vw, 36px);
+    line-height: 1.45;
+    font-weight: 400;
+    color: var(--fg);
+    letter-spacing: -0.01em;
+    transition: opacity 280ms ease, filter 280ms ease, transform 280ms ease;
+    text-wrap: pretty;
+  }
+  .message.fading {
+    opacity: 0;
+    filter: blur(2px);
+    transform: translateY(4px);
+  }
+  .message .glyph {
+    color: var(--accent);
+    opacity: 0.55;
+    font-weight: 500;
+    margin: 0 0.25em;
+    user-select: none;
+  }
+
+  .cursor {
+    display: inline-block;
+    width: 0.55em;
+    height: 1em;
+    background: var(--accent);
+    vertical-align: -0.1em;
+    margin-left: 0.15em;
+    animation: blink 1s steps(1, end) infinite;
+    box-shadow: 0 0 8px var(--accent);
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* ─── Refresh action row ─────────────────────────────── */
+  .actions {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 14px 18px;
+    border-top: 1px solid var(--line);
+    background: rgba(127, 255, 159, 0.02);
+  }
+
+  button.btn {
+    font-family: var(--mono);
+    font-size: 13px;
+    letter-spacing: 0.06em;
+    background: transparent;
+    color: var(--fg);
+    border: 1px solid var(--line-strong);
+    padding: 9px 16px;
+    cursor: pointer;
+    transition: background 140ms ease, color 140ms ease, border-color 140ms ease, box-shadow 140ms ease, transform 80ms ease;
+    text-transform: uppercase;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+  }
+  button.btn:hover {
+    background: rgba(127, 255, 159, 0.08);
+    border-color: var(--accent);
+    color: var(--accent);
+    box-shadow: 0 0 0 1px rgba(127,255,159,0.15), 0 0 24px rgba(127,255,159,0.12);
+  }
+  button.btn:active { transform: translateY(1px); }
+  button.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  button.btn .arrow { display: inline-block; }
+  button.btn.spinning .arrow {
+    animation: spin 700ms cubic-bezier(.5,.1,.2,1);
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .kbd {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    border: 1px solid var(--line);
+    padding: 2px 6px;
+    color: var(--fg-dim);
+    background: var(--bg);
+    border-radius: 2px;
+    letter-spacing: 0.04em;
+  }
+
+  .actions .hint {
+    color: var(--fg-faint);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* ─── Compose row ────────────────────────────────────── */
+  .compose {
+    border: 1px solid var(--line);
+    background: var(--bg-2);
+    display: grid;
+    grid-template-rows: auto auto;
+  }
+  .compose-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--line);
+    color: var(--fg-dim);
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+  .compose-head .counter { font-variant-numeric: tabular-nums; color: var(--fg-dim); }
+  .compose-head .counter.warn { color: var(--warn); }
+  .compose-head .counter.over { color: var(--error); }
+
+  .compose-row {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: stretch;
+  }
+  .prompt {
+    display: flex;
+    align-items: center;
+    padding: 0 12px 0 16px;
+    color: var(--accent);
+    font-weight: 500;
+    user-select: none;
+  }
+  .compose-input {
+    background: transparent;
+    border: 0;
+    outline: 0;
+    color: var(--fg);
+    font-family: var(--mono);
+    font-size: 15px;
+    padding: 14px 8px;
+    width: 100%;
+    caret-color: var(--accent);
+  }
+  .compose-input::placeholder { color: var(--fg-faint); }
+  .compose-submit {
+    border: 0;
+    border-left: 1px solid var(--line);
+    background: transparent;
+    color: var(--fg-dim);
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    padding: 0 18px;
+    cursor: pointer;
+    text-transform: uppercase;
+    transition: background 140ms ease, color 140ms ease;
+  }
+  .compose-submit:hover:not(:disabled) {
+    background: rgba(127,255,159,0.08);
+    color: var(--accent);
+  }
+  .compose-submit:disabled { color: var(--fg-faint); cursor: not-allowed; }
+
+  /* ─── Toast ─────────────────────────────────────────── */
+  .toast {
+    position: fixed;
+    bottom: 28px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: var(--bg-2);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    padding: 10px 18px;
+    text-transform: uppercase;
+    box-shadow: 0 0 0 1px rgba(127,255,159,0.1), 0 8px 32px rgba(0,0,0,0.5), 0 0 32px rgba(127,255,159,0.18);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 220ms ease, transform 280ms cubic-bezier(.4,.1,.2,1);
+    z-index: 60;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast .check { width: 14px; height: 14px; display: inline-grid; place-items: center; }
+
+  /* ─── Status bar ─────────────────────────────────────── */
+  .statusbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    color: var(--fg-faint);
+    font-size: 10.5px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    padding: 0 4px;
+  }
+  .statusbar .group { display: flex; gap: 16px; align-items: center; }
+  .statusbar .clock { color: var(--fg-dim); font-variant-numeric: tabular-nums; }
+
+  .dim { color: var(--fg-dim); }
+
+  @media (max-width: 640px) {
+    .topbar .right .hide-sm { display: none; }
+    .actions .hint { display: none; }
+    .app { padding: 14px; gap: 10px; }
+  }
+</style>
+</head>
+<body>
+  <div class="app">
+
+    <header class="topbar">
+      <div class="left">
+        <span class="dot" aria-hidden="true"></span>
+        <span class="path">msg.sys</span>
+        <span class="dim">/</span>
+        <span class="dim">terminal</span>
+        <span class="dim">v0.1</span>
+      </div>
+      <div class="right">
+        <span class="hide-sm">CONN <b>OK</b></span>
+        <span>DB <b>local.msgs</b></span>
+        <span>ROWS <b id="row-count">—</b></span>
+      </div>
+    </header>
+
+    <main class="main">
+      <div class="main-head">
+        <span>// random_message</span>
+        <span class="meta-id" id="msg-id">id —</span>
+      </div>
+      <div class="stage">
+        <div class="message" id="message" aria-live="polite">
+          <span class="glyph">"</span><span id="message-text">carregando…</span><span class="glyph">"</span><span class="cursor" aria-hidden="true"></span>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn" id="refresh-btn" title="Trocar mensagem">
+          <span class="arrow">↻</span>
+          <span>refresh</span>
+        </button>
+        <span class="hint">
+          ou pressione <span class="kbd">space</span> <span class="dim">/</span> <span class="kbd">→</span>
+        </span>
+      </div>
+    </main>
+
+    <section class="compose" aria-label="Postar nova mensagem">
+      <div class="compose-head">
+        <span>// new_message <span class="dim">— escreva e pressione enter</span></span>
+        <span class="counter" id="counter">0/280</span>
+      </div>
+      <form class="compose-row" id="compose-form" autocomplete="off">
+        <span class="prompt">$</span>
+        <input
+          class="compose-input"
+          id="compose-input"
+          type="text"
+          maxlength="280"
+          placeholder="digite uma mensagem…"
+          aria-label="Nova mensagem"
+        />
+        <button type="submit" class="compose-submit" id="compose-submit" disabled>
+          enter ↵
+        </button>
+      </form>
+    </section>
+
+    <footer class="statusbar">
+      <div class="group">
+        <span>READY</span>
+        <span class="dim">·</span>
+        <span><span class="kbd">space</span> next</span>
+        <span><span class="kbd">/</span> focus input</span>
+        <span><span class="kbd">esc</span> blur</span>
+      </div>
+      <div class="group">
+        <span class="clock" id="clock">--:--:--</span>
+      </div>
+    </footer>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite">
+    <span class="check">✓</span>
+    <span id="toast-text">mensagem postada</span>
+  </div>
+
+<script>
+const $msg       = document.getElementById('message');
+const $msgText   = document.getElementById('message-text');
+const $msgId     = document.getElementById('msg-id');
+const $rowCount  = document.getElementById('row-count');
+const $refresh   = document.getElementById('refresh-btn');
+const $form      = document.getElementById('compose-form');
+const $input     = document.getElementById('compose-input');
+const $submit    = document.getElementById('compose-submit');
+const $counter   = document.getElementById('counter');
+const $toast     = document.getElementById('toast');
+const $toastText = document.getElementById('toast-text');
+const $clock     = document.getElementById('clock');
+
+let currentId = null;
+let isLoading = false;
+
+function setCount(n) {
+  $rowCount.textContent = String(n).padStart(3, '0');
+}
+function fmtId(id) {
+  return id == null ? 'id —' : 'id #' + String(id).padStart(4, '0');
+}
+
+async function loadRandom() {
+  if (isLoading) return;
+  isLoading = true;
+  $refresh.classList.add('spinning');
+  $refresh.disabled = true;
+
+  $msg.classList.add('fading');
+  await new Promise(r => setTimeout(r, 260));
+
+  try {
+    const params = currentId != null ? `?exclude=${currentId}` : '';
+    const res = await fetch(`/api/messages/random${params}`);
+    if (res.ok) {
+      const data = await res.json();
+      currentId = data.id;
+      $msgText.textContent = data.text;
+      $msgId.textContent = fmtId(data.id);
+      setCount(data.total);
+    } else {
+      $msgText.textContent = '(banco vazio — escreva a primeira mensagem)';
+      $msgId.textContent = fmtId(null);
+    }
+  } catch {
+    $msgText.textContent = '(erro ao carregar)';
+    $msgId.textContent = fmtId(null);
+  }
+
+  $msg.classList.remove('fading');
+  await new Promise(r => setTimeout(r, 320));
+
+  $refresh.classList.remove('spinning');
+  $refresh.disabled = false;
+  isLoading = false;
+}
+
+let toastTimer = null;
+function showToast(text, isError = false) {
+  $toastText.textContent = text;
+  $toast.style.borderColor = isError ? 'var(--error)' : 'var(--accent)';
+  $toast.style.color       = isError ? 'var(--error)' : 'var(--accent)';
+  $toast.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => $toast.classList.remove('show'), 2200);
+}
+
+function updateCounter() {
+  const n = $input.value.length;
+  $counter.textContent = `${n}/280`;
+  $counter.classList.toggle('warn', n > 240 && n <= 280);
+  $counter.classList.toggle('over', n > 280);
+  $submit.disabled = $input.value.trim().length === 0;
+}
+$input.addEventListener('input', updateCounter);
+
+$form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const text = $input.value.trim();
+  if (!text) return;
+  $submit.disabled = true;
+
+  try {
+    const res = await fetch('/api/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    const data = await res.json();
+
+    if (res.ok) {
+      setCount(data.total);
+      showToast(`mensagem #${String(data.id).padStart(4, '0')} postada`);
+      $input.value = '';
+      updateCounter();
+
+      isLoading = true;
+      $msg.classList.add('fading');
+      await new Promise(r => setTimeout(r, 260));
+      currentId = data.id;
+      $msgText.textContent = data.text;
+      $msgId.textContent = fmtId(data.id);
+      $msg.classList.remove('fading');
+      isLoading = false;
+    } else {
+      showToast('erro ao postar', true);
+      $submit.disabled = false;
+    }
+  } catch {
+    showToast('erro ao postar', true);
+    $submit.disabled = false;
+  }
+});
+
+$refresh.addEventListener('click', loadRandom);
+
+window.addEventListener('keydown', (e) => {
+  const inField = document.activeElement === $input;
+  if (e.key === '/' && !inField) { e.preventDefault(); $input.focus(); return; }
+  if (e.key === 'Escape' && inField) { $input.blur(); return; }
+  if (inField) return;
+  if (e.key === ' ' || e.key === 'ArrowRight') { e.preventDefault(); loadRandom(); }
+});
+
+function tick() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  $clock.textContent = `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+setInterval(tick, 1000); tick();
+
+(async function boot() {
+  try {
+    const res = await fetch('/api/messages/count');
+    const { total } = await res.json();
+    setCount(total ?? 0);
+  } catch { setCount(0); }
+  await loadRandom();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - msg_data:/data
+    environment:
+      PORT: 3000
+      DATA_DIR: /data
+    restart: unless-stopped
+
+volumes:
+  msg_data:
